@@ -2,7 +2,7 @@
 
 A goal tracker for people at work: set goals, write short daily logs, mark achievements, and see which skills your work builds over time.
 
-**Live demo:** _link coming soon_
+**Live demo:** https://kowabowa-demo.vercel.app
 **Demo account:** _email / password coming soon_
 
 ## Why
