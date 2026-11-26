@@ -1,0 +1,235 @@
+"use client";
+
+import { Button } from "@/atoms/button";
+import { useEffect, useState } from "react";
+import { GoalsApi } from "@/api/goals";
+import { GoalsCreate } from "../create";
+import Link from "next/link";
+import { ROUTES } from "@/constants/routes";
+import { GOAL_STATUS_COLOR, GOAL_STATUS_LABEL } from "../../constants";
+import { formatDate } from "../../utils";
+import { Input } from "@/atoms/input";
+import { Chip, Tab, Tabs } from "@mui/material";
+import { EGoalStatus, type IGoalModel } from "@/interfaces/goal.model";
+import { PageLayout } from "@/components/PageLayout";
+import AddIcon from "@mui/icons-material/Add";
+import { RawLogsCreate } from "@/modules/raw-logs/components/create";
+import { GoalActions } from "../actions";
+import { useRouter } from "next/navigation";
+import TrackChangesIcon from "@mui/icons-material/TrackChanges";
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+type StatusTab = "all" | EGoalStatus;
+
+const TABS: StatusTab[] = [
+  "all",
+  EGoalStatus.NOT_STARTED,
+  EGoalStatus.IN_PROGRESS,
+  EGoalStatus.COMPLETED,
+];
+
+export function GoalsList() {
+  const [createOpen, setCreateOpen] = useState(false);
+  const [goals, setGoals] = useState<IGoalModel[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [search, setSearch] = useState("");
+  const [tab, setTab] = useState<StatusTab>("all");
+  const [logGoalId, setLogGoalId] = useState<string | null>(null);
+
+  const router = useRouter();
+
+  useEffect(() => {
+    let cancelled = false;
+
+    GoalsApi.list()
+      .then(({ data }) => {
+        if (cancelled) return;
+        setGoals(data);
+        setError(null);
+      })
+      .catch(() => {
+        if (!cancelled) setError("Could not load your goals.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [reloadKey]);
+
+  const keyword = search.trim().toLowerCase();
+  const searchedGoals = goals.filter((goal) =>
+    goal.title.toLowerCase().includes(keyword),
+  );
+  const visibleGoals = searchedGoals.filter(
+    (goal) => tab === "all" || goal.status === tab,
+  );
+
+  const countFor = (t: StatusTab) =>
+    t === "all"
+      ? searchedGoals.length
+      : searchedGoals.filter((goal) => goal.status === t).length;
+
+  const ready = !loading && !error;
+  const isEmpty = ready && goals.length === 0;
+  const noMatch = ready && goals.length > 0 && visibleGoals.length === 0;
+
+  const clearFilters = () => {
+    setSearch("");
+    setTab("all");
+  };
+
+  const retry = () => {
+    setLoading(true);
+    setError(null);
+    setReloadKey((k) => k + 1);
+  };
+
+  return (
+    <PageLayout
+      title="Goals"
+      subtitle="Everything you're working toward right now"
+      actions={
+        <Button startIcon={<AddIcon />} onClick={() => setCreateOpen(true)}>
+          Create Goal
+        </Button>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        {loading && (
+          <p role="status" className="py-10 text-center text-sm text-gray-500">
+            Loading your goals...
+          </p>
+        )}
+
+        {error && (
+          <div
+            role="alert"
+            className="flex flex-col items-center gap-3 rounded border border-gray-200 py-10 text-center"
+          >
+            <p className="text-sm text-gray-700">{error}</p>
+            <Button variant="secondary" onClick={retry}>
+              Try agian
+            </Button>
+          </div>
+        )}
+
+        {ready && goals.length > 0 && (
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="w-full md:w-72">
+              <Input
+                placeholder="Search goals"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+            <Tabs
+              value={tab}
+              onChange={(_, value) => setTab(value)}
+              variant="scrollable"
+            >
+              {TABS.map((t) => (
+                <Tab
+                  key={t}
+                  value={t}
+                  label={`${t === "all" ? "All" : GOAL_STATUS_LABEL[t]} (${countFor(t)})`}
+                />
+              ))}
+            </Tabs>
+          </div>
+        )}
+
+        {isEmpty && (
+          <div className="flex flex-col items-center gap-3 rounded border border-dashed border-gray-300 px-6 py-12 text-center">
+            <TrackChangesIcon sx={{ fontSize: 40, color: "text.disabled" }} />
+            <h2 className="text-base font-semibold">No goals yet</h2>
+            <p className="max-w-sm text-sm text-gray-500">
+              Set a goal for what you are working toward, then log your progress
+              as you go.
+            </p>
+            <Button startIcon={<AddIcon />} onClick={() => setCreateOpen(true)}>
+              Create your first goal
+            </Button>
+          </div>
+        )}
+
+        {noMatch && (
+          <div className="flex flex-col items-start gap-2">
+            <p className="text-sm text-gray-500">No goals match your filters</p>
+            <Button variant="text" onClick={clearFilters}>
+              Clear filters
+            </Button>
+          </div>
+        )}
+
+        {visibleGoals.length > 0 && (
+          <ul className="flex flex-col gap-2">
+            {visibleGoals.map((goal) => (
+              <li
+                key={goal.id}
+                className="relative flex items-center justify-between gap-4 rounded border border-gray-200 p-4 hover:bg-gray-50"
+              >
+                <div className="flex min-w-0 flex-col gap-2">
+                  <Chip
+                    size="small"
+                    className="self-start"
+                    label={GOAL_STATUS_LABEL[goal.status]}
+                    color={GOAL_STATUS_COLOR[goal.status]}
+                  />
+                  <Link
+                    href={ROUTES.GOALS.DETAIL(goal.id)}
+                    className="break-words font-semibold after:absolute after:inset-0"
+                  >
+                    {goal.title}
+                  </Link>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-gray-500">
+                    <span>
+                      {formatDate(goal.startDate)} - {formatDate(goal.endDate)}
+                    </span>
+                    <span aria-hidden="true">|</span>
+                    <span>{plural(goal.logsCount, "log")}</span>
+                    <span aria-hidden="true">|</span>
+                    <span>{plural(goal.achievementsCount, "achievement")}</span>
+                  </div>
+                </div>
+
+                <div className="relative z-10 flex shrink-0 items-center gap-1">
+                  <Button
+                    variant="secondary"
+                    size="small"
+                    startIcon={<AddIcon />}
+                    onClick={() => setLogGoalId(goal.id)}
+                  >
+                    Add log
+                  </Button>
+                  <GoalActions
+                    goal={goal}
+                    onSaved={() => setReloadKey((k) => k + 1)}
+                    onDeleted={() => setReloadKey((k) => k + 1)}
+                  />
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <GoalsCreate
+          open={createOpen}
+          onClose={() => setCreateOpen(false)}
+          onSaved={(saved) => router.push(ROUTES.GOALS.DETAIL(saved.id))}
+        />
+
+        {/* Always mounted: closing the form must not unmount the achievement dialog. */}
+        <RawLogsCreate
+          open={logGoalId !== null}
+          defaultGoalId={logGoalId ?? undefined}
+          onClose={() => setLogGoalId(null)}
+          onCreated={() => setReloadKey((k) => k + 1)}
+        />
+      </div>
+    </PageLayout>
+  );
+}
