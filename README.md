@@ -3,7 +3,7 @@
 A goal tracker for people at work: set goals, write short daily logs, mark achievements, and see which skills your work builds over time.
 
 **Live demo:** https://kowabowa-demo.vercel.app
-**Demo account:** _email / password coming soon_
+**Try it:** sign up with any email (no confirmation needed). A pre-filled demo account is available on request.
 
 ## Why
 
@@ -26,7 +26,7 @@ Most people only remember what they achieved when review season arrives. Kowabow
 ## Team and my role
 
 Built by a team of 4 as the final project of the *Iterating Product With AI* course (Breaking into Product Management, 2026).
-I (Doan Dinh Duong) led the team. Team members: _[names to add]_.
+Team: Doan Dinh Duong (team lead), tranthuyvanhn1990, MinhNhai and Huong Nguyen (Lowe). Frontend starter by JustNam.
 
 This repository is my personal deployment of the team's work, combining the frontend and backend into one repo. The original team repositories are kept separately.
 
@@ -42,4 +42,4 @@ cp .env.local.example .env.local   # fill in your Supabase URL and anon/publisha
 npm run dev                        # http://localhost:3000
 ```
 
-Database schema and Edge Functions live in `supabase/` (`supabase db push`, `supabase functions deploy`).
+Database schema and Edge Functions live in `supabase/` (`supabase db push`, `supabase functions deploy`). Demo data: run `supabase/demo-seed.sql` in the Supabase SQL Editor.
