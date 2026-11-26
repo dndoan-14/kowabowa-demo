@@ -65,6 +65,10 @@ const defaultResolver = (call: QueryCall): QueryResult => {
   if (call.op === 'insert') {
     return { data: { id: 'log-new', ...(call.payload as object), deleted_at: null } }
   }
+  // Lấy danh sách (GET /logs): trả về mảng log
+  if (call.op === 'select' && call.terminal === 'await') {
+    return { data: [LOG] }
+  }
   const found = filter(call, 'id') === 'log-1' && filter(call, 'user_id') === 'user-1'
   if (!found) return { data: null }
   if (call.op === 'update') return { data: { ...LOG, ...(call.payload as object) } }
@@ -121,7 +125,7 @@ test('Chưa đăng nhập -> 401, không truy vấn DB', async () => {
   mock.user = null
   const res = await send('GET', '/log-1')
   assertEquals(res.status, 401)
-  assertEquals(res.json, { error: 'Bạn chưa đăng nhập' })
+  assertEquals(res.json, { error: 'Please sign in to continue' })
   assertEquals(mock.calls.length, 0)
 })
 
@@ -131,20 +135,15 @@ test('Response lỗi có Content-Type JSON và CORS header', async () => {
   assertEquals(res.headers.get('Access-Control-Allow-Origin'), '*')
 })
 
-for (const method of ['GET', 'PUT', 'PATCH', 'DELETE']) {
+for (const method of ['PUT', 'PATCH', 'DELETE']) {
   test(`${method} /logs không có id -> 400`, async () => {
     const hasBody = method === 'PUT' || method === 'PATCH'
     const res = await send(method, '', hasBody ? {} : undefined)
     assertEquals(res.status, 400)
-    assertEquals(res.json, { error: 'Thiếu id của log' })
+    assertEquals(res.json, { error: 'Log ID is required' })
   })
 }
 
-test('GET /logs/ (dấu / cuối, id rỗng) -> 400', async () => {
-  const res = await send('GET', '/')
-  assertEquals(res.status, 400)
-  assertEquals(res.json, { error: 'Thiếu id của log' })
-})
 
 test('POST /logs/{id} -> 405', async () => {
   const res = await send('POST', '/log-1', validBody())
@@ -160,15 +159,14 @@ test('Method không hỗ trợ (HEAD) -> 405', async () => {
 // POST /logs
 // =====================================================================
 
-test('POST hợp lệ -> 201, trim title, user_id lấy từ token, trả counts', async () => {
+test('POST hợp lệ -> 201, trim title, user_id lấy từ token', async () => {
   const res = await send('POST', '', { ...validBody(), user_id: 'hacker' })
   assertEquals(res.status, 201)
-  assertEquals(res.json.log.title, 'Học Deno')
-  assertEquals(res.json.log.user_id, 'user-1')
-  assertEquals(res.json.log.skill_id, null)
-  assertEquals(res.json.log.description, null)
-  assertEquals(res.json.log.is_achievement, false)
-  assertEquals(res.json.counts, { logs: 13, achievements: 3, goal_logs: 5, goal_achievements: 2 })
+  assertEquals(res.json.data.title, 'Học Deno')
+  assertEquals(res.json.data.user_id, 'user-1')
+  assertEquals(res.json.data.skill_id, null)
+  assertEquals(res.json.data.description, null)
+  assertEquals(res.json.data.is_achievement, false)
 })
 
 test('POST đủ trường tuỳ chọn -> lưu đúng skill, description (trim), achievement', async () => {
@@ -189,6 +187,11 @@ test('POST description toàn khoảng trắng -> lưu null', async () => {
   assertEquals(firstWrite().description, null)
 })
 
+test('POST lưu logged_at dạng ISO UTC', async () => {
+  await send('POST', '', validBody())
+  assertEquals(firstWrite().logged_at, '2026-09-26T09:00:00.000Z')
+})
+
 test('POST skill_id null và description null được chấp nhận', async () => {
   const res = await send('POST', '', { ...validBody(), skill_id: null, description: null })
   assertEquals(res.status, 201)
@@ -199,44 +202,41 @@ test('POST skill do chính user tạo -> 201', async () => {
   assertEquals(res.status, 201)
 })
 
-test('POST skill của user khác -> 400 Skill không tồn tại', async () => {
+test('POST skill của user khác -> 400 Skill not found', async () => {
   const res = await send('POST', '', { ...validBody(), skill_id: 'skill-other' })
   assertEquals(res.status, 400)
-  assertEquals(res.json, { error: 'Skill không tồn tại' })
+  assertEquals(res.json, { error: 'Skill not found' })
   assertEquals(writes().length, 0)
 })
 
 test('POST skill không có trong DB -> 400', async () => {
   const res = await send('POST', '', { ...validBody(), skill_id: 'nope' })
   assertEquals(res.status, 400)
-  assertEquals(res.json, { error: 'Skill không tồn tại' })
+  assertEquals(res.json, { error: 'Skill not found' })
 })
 
-test('POST goal không thuộc user -> 400 Goal không tồn tại', async () => {
+test('POST goal không thuộc user -> 400 Goal not found', async () => {
   const res = await send('POST', '', { ...validBody(), goal_id: 'goal-x' })
   assertEquals(res.status, 400)
-  assertEquals(res.json, { error: 'Goal không tồn tại' })
+  assertEquals(res.json, { error: 'Goal not found' })
   assertEquals(writes().length, 0)
 })
 
 test('POST body không phải JSON -> 400', async () => {
   const res = await send('POST', '', undefined, '{not json')
   assertEquals(res.status, 400)
-  assertEquals(res.json, { error: 'Body phải là JSON hợp lệ' })
+  assertEquals(res.json, { error: 'Invalid request body' })
 })
 
 const invalidCases: Array<[string, Record<string, unknown>, string]> = [
-  ['thiếu title', { title: undefined }, 'Log là bắt buộc'],
-  ['title không phải chữ', { title: 123 }, 'Log là bắt buộc'],
-  ['title toàn khoảng trắng', { title: '   ' }, 'Log là bắt buộc'],
-  ['thiếu goal_id', { goal_id: undefined }, 'Goal là bắt buộc'],
-  ['goal_id là số', { goal_id: 1 }, 'Goal là bắt buộc'],
-  ['thiếu logged_at', { logged_at: undefined }, 'Date & time là bắt buộc'],
-  ['logged_at sai định dạng', { logged_at: 'hôm qua' }, 'Date & time không hợp lệ'],
-  ['skill_id là số', { skill_id: 5 }, 'Skill không hợp lệ'],
-  ['description là số', { description: 5 }, 'Description không hợp lệ'],
-  ['is_achievement là chuỗi', { is_achievement: 'true' }, 'Achievement phải là true hoặc false'],
-  ['is_achievement là null', { is_achievement: null }, 'Achievement phải là true hoặc false'],
+  ['thiếu title', { title: undefined }, 'Title is required'],
+  ['title không phải chữ', { title: 123 }, 'Title is required'],
+  ['title toàn khoảng trắng', { title: '   ' }, 'Title is required'],
+  ['thiếu goal_id', { goal_id: undefined }, 'Goal is required'],
+  ['goal_id là số', { goal_id: 1 }, 'Goal is required'],
+  ['thiếu logged_at', { logged_at: undefined }, 'Date & time is required'],
+  ['logged_at sai định dạng', { logged_at: 'hôm qua' }, 'Invalid date & time'],
+  ['description là số', { description: 5 }, 'Invalid description'],
 ]
 
 for (const [name, patch, message] of invalidCases) {
@@ -252,24 +252,59 @@ test('POST insert lỗi DB -> 500', async () => {
   mock.resolver = (c) => (c.op === 'insert' ? { error: { message: 'boom' } } : defaultResolver(c))
   const res = await send('POST', '', validBody())
   assertEquals(res.status, 500)
-  assertEquals(res.json, { error: 'Không tạo được log' })
+  assertEquals(res.json, { error: 'Failed to create log' })
 })
 
-test('POST đếm lỗi -> vẫn 201, counts là null', async () => {
-  mock.resolver = (c) => (c.options?.head === true ? { error: { message: 'x' } } : defaultResolver(c))
+test('POST không còn trả / không còn đếm counts', async () => {
   const res = await send('POST', '', validBody())
   assertEquals(res.status, 201)
-  assertEquals(res.json.counts, { logs: null, achievements: null, goal_logs: null, goal_achievements: null })
+  assertEquals(res.json.counts, undefined)
+  assertEquals(mock.calls.filter((c) => c.options?.head === true).length, 0)
 })
 
-test('Bộ đếm chỉ đếm log của user và chưa xoá', async () => {
-  await send('POST', '', validBody())
-  const countCalls = mock.calls.filter((c) => c.options?.head === true)
-  assertEquals(countCalls.length, 4)
-  for (const c of countCalls) {
-    assertEquals(filter(c, 'user_id'), 'user-1')
-    assertEquals(hasNotDeletedFilter(c), true)
-  }
+// =====================================================================
+// GET /logs
+// =====================================================================
+
+test('GET /logs -> 200, lọc theo user, chưa xoá, mới nhất trước', async () => {
+  const res = await send('GET')
+  assertEquals(res.status, 200)
+  assertEquals(res.json, { data: [LOG] })
+  assertEquals(filter(mock.calls[0], 'user_id'), 'user-1')
+  assertEquals(hasNotDeletedFilter(mock.calls[0]), true)
+  assertEquals(mock.calls[0].order, ['logged_at', { ascending: false }])
+})
+
+test('GET /logs/ (dấu / cuối, id rỗng) -> lấy danh sách', async () => {
+  const res = await send('GET', '/')
+  assertEquals(res.status, 200)
+  assertEquals(res.json, { data: [LOG] })
+})
+
+test('GET /logs?goal_id= -> chỉ lấy log của goal đó', async () => {
+  const res = await send('GET', '?goal_id=goal-1')
+  assertEquals(res.status, 200)
+  assertEquals(filter(mock.calls[0], 'goal_id'), 'goal-1')
+  assertEquals(filter(mock.calls[0], 'user_id'), 'user-1')
+})
+
+test('GET /logs không có goal_id -> không lọc theo goal', async () => {
+  await send('GET')
+  assertEquals(filter(mock.calls[0], 'goal_id'), undefined)
+})
+
+test('GET /logs chưa có log nào -> 200, danh sách rỗng', async () => {
+  mock.resolver = () => ({ data: [] })
+  const res = await send('GET')
+  assertEquals(res.status, 200)
+  assertEquals(res.json, { data: [] })
+})
+
+test('GET /logs lỗi DB -> 500', async () => {
+  mock.resolver = () => ({ error: { message: 'boom' } })
+  const res = await send('GET')
+  assertEquals(res.status, 500)
+  assertEquals(res.json, { error: 'Failed to load logs' })
 })
 
 // =====================================================================
@@ -279,7 +314,7 @@ test('Bộ đếm chỉ đếm log của user và chưa xoá', async () => {
 test('GET log tồn tại -> 200, lọc theo user và chưa xoá', async () => {
   const res = await send('GET', '/log-1')
   assertEquals(res.status, 200)
-  assertEquals(res.json, { log: LOG })
+  assertEquals(res.json, { data: LOG })
   assertEquals(filter(mock.calls[0], 'user_id'), 'user-1')
   assertEquals(hasNotDeletedFilter(mock.calls[0]), true)
 })
@@ -294,18 +329,17 @@ test('GET lỗi DB -> 500', async () => {
   mock.resolver = () => ({ error: { message: 'boom' } })
   const res = await send('GET', '/log-1')
   assertEquals(res.status, 500)
-  assertEquals(res.json, { error: 'Không lấy được log' })
+  assertEquals(res.json, { error: 'Failed to load log' })
 })
 
 // =====================================================================
 // PUT /logs/{id}
 // =====================================================================
 
-test('PUT hợp lệ -> 200, trả log đã cập nhật + counts', async () => {
+test('PUT hợp lệ -> 200, trả log đã cập nhật', async () => {
   const res = await send('PUT', '/log-1', { ...validBody(), title: 'Mới' })
   assertEquals(res.status, 200)
-  assertEquals(res.json.log.title, 'Mới')
-  assertEquals(res.json.counts, { logs: 13, achievements: 3, goal_logs: 5, goal_achievements: 2 })
+  assertEquals(res.json.data.title, 'Mới')
   assertEquals(hasNotDeletedFilter(writes()[0]), true)
 })
 
@@ -319,9 +353,31 @@ test('PUT có gửi is_achievement -> cập nhật', async () => {
   assertEquals(firstWrite().is_achievement, true)
 })
 
+test('PUT không gửi description -> giữ nguyên description', async () => {
+  await send('PUT', '/log-1', validBody())
+  assertEquals('description' in firstWrite(), false)
+})
+
+for (const value of [null, '', '   ']) {
+  test(`PUT description=${JSON.stringify(value)} -> xoá description`, async () => {
+    await send('PUT', '/log-1', { ...validBody(), description: value })
+    assertEquals(firstWrite().description, null)
+  })
+}
+
+test('PUT có gửi description -> lưu (trim)', async () => {
+  await send('PUT', '/log-1', { ...validBody(), description: '  ghi chú  ' })
+  assertEquals(firstWrite().description, 'ghi chú')
+})
+
 test('PUT bỏ skill_id -> skill_id thành null', async () => {
   await send('PUT', '/log-1', validBody())
   assertEquals(firstWrite().skill_id, null)
+})
+
+test('PUT lưu logged_at dạng ISO UTC', async () => {
+  await send('PUT', '/log-1', validBody())
+  assertEquals(firstWrite().logged_at, '2026-09-26T09:00:00.000Z')
 })
 
 test('PUT không cho đổi user_id', async () => {
@@ -338,32 +394,32 @@ test('PUT log không tồn tại -> 404', async () => {
 test('PUT title rỗng -> 400', async () => {
   const res = await send('PUT', '/log-1', { ...validBody(), title: '' })
   assertEquals(res.status, 400)
-  assertEquals(res.json, { error: 'Log là bắt buộc' })
+  assertEquals(res.json, { error: 'Title is required' })
 })
 
 test('PUT goal không thuộc user -> 400', async () => {
   const res = await send('PUT', '/log-1', { ...validBody(), goal_id: 'goal-x' })
   assertEquals(res.status, 400)
-  assertEquals(res.json, { error: 'Goal không tồn tại' })
+  assertEquals(res.json, { error: 'Goal not found' })
 })
 
 test('PUT skill của user khác -> 400', async () => {
   const res = await send('PUT', '/log-1', { ...validBody(), skill_id: 'skill-other' })
   assertEquals(res.status, 400)
-  assertEquals(res.json, { error: 'Skill không tồn tại' })
+  assertEquals(res.json, { error: 'Skill not found' })
 })
 
 test('PUT body không phải JSON -> 400', async () => {
   const res = await send('PUT', '/log-1', undefined, 'abc')
   assertEquals(res.status, 400)
-  assertEquals(res.json, { error: 'Body phải là JSON hợp lệ' })
+  assertEquals(res.json, { error: 'Invalid request body' })
 })
 
 test('PUT lỗi DB -> 500', async () => {
   mock.resolver = (c) => (c.op === 'update' ? { error: { message: 'boom' } } : defaultResolver(c))
   const res = await send('PUT', '/log-1', validBody())
   assertEquals(res.status, 500)
-  assertEquals(res.json, { error: 'Không cập nhật được log' })
+  assertEquals(res.json, { error: 'Failed to update log' })
 })
 
 // =====================================================================
@@ -374,10 +430,8 @@ for (const value of [true, false]) {
   test(`PATCH is_achievement=${value} -> 200`, async () => {
     const res = await send('PATCH', '/log-1', { is_achievement: value })
     assertEquals(res.status, 200)
-    assertEquals(res.json.log.is_achievement, value)
+    assertEquals(res.json.data.is_achievement, value)
     assertEquals(writes()[0].payload, { is_achievement: value })
-    // counts theo goal của log
-    assertEquals(res.json.counts.goal_logs, 5)
   })
 }
 
@@ -390,14 +444,14 @@ for (const bad of [undefined, 'true', 1, null]) {
   test(`PATCH is_achievement=${JSON.stringify(bad)} -> 400`, async () => {
     const res = await send('PATCH', '/log-1', { is_achievement: bad })
     assertEquals(res.status, 400)
-    assertEquals(res.json, { error: 'is_achievement phải là true hoặc false' })
+    assertEquals(res.json, { error: 'is_achievement must be true or false' })
   })
 }
 
 test('PATCH body không phải JSON -> 400', async () => {
   const res = await send('PATCH', '/log-1', undefined, '')
   assertEquals(res.status, 400)
-  assertEquals(res.json, { error: 'Body phải là JSON hợp lệ' })
+  assertEquals(res.json, { error: 'Invalid request body' })
 })
 
 test('PATCH log không tồn tại -> 404', async () => {
@@ -410,18 +464,17 @@ test('PATCH lỗi DB -> 500', async () => {
   mock.resolver = (c) => (c.op === 'update' ? { error: { message: 'boom' } } : defaultResolver(c))
   const res = await send('PATCH', '/log-1', { is_achievement: true })
   assertEquals(res.status, 500)
-  assertEquals(res.json, { error: 'Không cập nhật được achievement' })
+  assertEquals(res.json, { error: 'Failed to update achievement' })
 })
 
 // =====================================================================
 // DELETE /logs/{id}
 // =====================================================================
 
-test('DELETE -> 200, soft delete (ghi deleted_at), trả deleted_id + counts', async () => {
+test('DELETE -> 200, soft delete (ghi deleted_at), trả id của log', async () => {
   const res = await send('DELETE', '/log-1')
   assertEquals(res.status, 200)
-  assertEquals(res.json.deleted_id, 'log-1')
-  assertEquals(res.json.counts.logs, 13)
+  assertEquals(res.json, { data: { id: 'log-1' } })
   const w = writes()[0]
   assertEquals(w.op, 'update')
   const deletedAt = (w.payload as Record<string, string>).deleted_at
@@ -439,5 +492,5 @@ test('DELETE lỗi DB -> 500', async () => {
   mock.resolver = () => ({ error: { message: 'boom' } })
   const res = await send('DELETE', '/log-1')
   assertEquals(res.status, 500)
-  assertEquals(res.json, { error: 'Không xoá được log' })
+  assertEquals(res.json, { error: 'Failed to delete log' })
 })

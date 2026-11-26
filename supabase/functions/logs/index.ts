@@ -72,46 +72,46 @@ const readJsonBody = async (req: Request) => {
 const findLogFieldError = (body: Record<string, unknown>) => {
   // Log (title) - bắt buộc
   if (typeof body.title !== 'string') {
-    return 'Log là bắt buộc'
+    return 'Title is required'
   }
   if (body.title.trim() === '') {
-    return 'Log là bắt buộc'
+    return 'Title is required'
   }
 
   // Goal (goal_id) - bắt buộc
   if (typeof body.goal_id !== 'string') {
-    return 'Goal là bắt buộc'
+    return 'Goal is required'
   }
 
   // Date & time (logged_at) - bắt buộc, vd: "2026-09-26T16:00:00+07:00"
   if (typeof body.logged_at !== 'string') {
-    return 'Date & time là bắt buộc'
+    return 'Date & time is required'
   }
   const loggedAt = new Date(body.logged_at)
   if (isNaN(loggedAt.getTime())) {
-    return 'Date & time không hợp lệ'
+    return 'Invalid date & time'
   }
 
-  // Skills (skill_id) - không bắt buộc. Nếu có gửi thì phải là chữ.
-  if (body.skill_id !== undefined && body.skill_id !== null) {
-    if (typeof body.skill_id !== 'string') {
-      return 'Skill không hợp lệ'
-    }
-  }
+  // Skills (skill_id) - không bắt buộc. Nếu có gửi thì phải là chữ. Bỏ vì không cho phép user tự động add skill nhanh
+  // if (body.skill_id !== undefined && body.skill_id !== null) {
+  //   if (typeof body.skill_id !== 'string') {
+  //    return 'Invalid skill'
+  //  }
+  // }
 
   // Description - không bắt buộc. Nếu có gửi thì phải là chữ.
   if (body.description !== undefined && body.description !== null) {
     if (typeof body.description !== 'string') {
-      return 'Description không hợp lệ'
+      return 'Invalid description'
     }
   }
 
-  // Achievement (is_achievement) - không bắt buộc. Nếu có gửi thì phải là true hoặc false.
-  if (body.is_achievement !== undefined) {
-    if (typeof body.is_achievement !== 'boolean') {
-      return 'Achievement phải là true hoặc false'
-    }
-  }
+  // Achievement (is_achievement) - không bắt buộc. Nếu có gửi thì phải là true hoặc false. Không biết có cần không? Vì Achievement default luôn là false 
+  // if (body.is_achievement !== undefined) {
+  //  if (typeof body.is_achievement !== 'boolean') {
+  //    return 'Achievement must be true or false'
+  //  }
+  //}
 
   return null
 }
@@ -152,16 +152,20 @@ const checkSkillCanBeUsed = async (supabase: SupabaseClient, user: User, skillId
   return false
 }
 
+
+
 // =====================================================================
 // BỘ ĐẾM LOGS / ACHIEVEMENTS
 // Sau mỗi lần POST / PUT / PATCH / DELETE thành công, trả về số đếm mới
 // để FE cập nhật con số trên màn hình (Logs 13, Achievements 3...).
 // =====================================================================
 
+// Không dùng bộ đếm, chỉ để tham khảo
 // Đếm số log của user (chưa bị xoá).
 // goalId khác null -> chỉ đếm log của goal đó.
 // onlyAchievements = true -> chỉ đếm log được đánh dấu achievement.
-const countLogs = async (
+// bộ đếm log này sẽ được dùng trong log hay goal? Và làm thế nào để 1 endpoint gọi 1 endpoint khác?
+/* const countLogs = async (
   supabase: SupabaseClient,
   user: User,
   goalId: string | null,
@@ -206,6 +210,9 @@ const getCounts = async (supabase: SupabaseClient, user: User, goalId: string | 
     goal_achievements: goalAchievements,
   }
 }
+*/
+
+
 
 // =====================================================================
 // CÁC ENDPOINT
@@ -218,7 +225,7 @@ const postLog = async (supabase: SupabaseClient, user: User, req: Request) => {
   // 1. Body phải là JSON
   const body = await readJsonBody(req)
   if (body === null) {
-    return jsonError('Body phải là JSON hợp lệ', 400)
+    return jsonError('Invalid request body', 400)
   }
 
   // 2. Kiểm tra các trường bắt buộc (Log, Goal, Date & time)
@@ -232,7 +239,7 @@ const postLog = async (supabase: SupabaseClient, user: User, req: Request) => {
   // 3. Goal phải thuộc về user
   const goalIsValid = await checkGoalBelongsToUser(supabase, user, goalId)
   if (goalIsValid === false) {
-    return jsonError('Goal không tồn tại', 400)
+    return jsonError('Goal not found', 400)
   }
 
   // 4. Skill (nếu có) phải được phép dùng
@@ -241,7 +248,7 @@ const postLog = async (supabase: SupabaseClient, user: User, req: Request) => {
     skillId = body.skill_id
     const skillIsValid = await checkSkillCanBeUsed(supabase, user, skillId)
     if (skillIsValid === false) {
-      return jsonError('Skill không tồn tại', 400)
+      return jsonError('Skill not found', 400)
     }
   }
 
@@ -263,7 +270,7 @@ const postLog = async (supabase: SupabaseClient, user: User, req: Request) => {
     title: String(body.title).trim(),
     goal_id: goalId,
     skill_id: skillId,
-    logged_at: String(body.logged_at),
+    logged_at: new Date(String(body.logged_at)).toISOString(),
     description: description,
     is_achievement: isAchievement,
   }
@@ -276,30 +283,37 @@ const postLog = async (supabase: SupabaseClient, user: User, req: Request) => {
     .single()
 
   if (result.error !== null) {
-    return jsonError('Không tạo được log', 500)
+    return jsonError('Failed to create log', 500)
   }
 
-  // 7. Trả log vừa tạo + số đếm mới
-  const counts = await getCounts(supabase, user, goalId)
-  return jsonResponse({ log: result.data, counts: counts }, 201)
+  // 7. Trả log vừa tạo
+  // const counts = await getCounts(supabase, user, goalId) // 10 Oct - Đặt thành comment do không dùng bộ đếm ở BE
+  return jsonResponse({ data: result.data }, 201)
 }
 
 // GET /logs
 // Lấy danh sách tất cả log của user (chưa bị xoá), log mới nhất nằm trên cùng.
-const getLogs = async (supabase: SupabaseClient, user: User) => {
-  const result = await supabase
+const getLogs = async (supabase: SupabaseClient, user: User, goalId: string | null) => {
+  let query = supabase
     .from('raw_logs')
     .select('*')
     .eq('user_id', user.id)
     .is('deleted_at', null)
-    .order('logged_at', { ascending: false })
+  //  .order('logged_at', { ascending: false })
+
+  //10 Oct - Thêm điều kiện lọc log theo goal
+  if (goalId !== null) {
+    query = query.eq('goal_id', goalId)
+  }
+  
+  const result = await query.order('logged_at', { ascending: false })
 
   if (result.error !== null) {
-    return jsonError('Không lấy được danh sách log', 500)
+    return jsonError('Failed to load logs', 500)
   }
 
   // Chưa có log nào -> result.data là danh sách rỗng [], vẫn trả 200
-  return jsonResponse({ logs: result.data }, 200)
+  return jsonResponse({ data: result.data }, 200)
 }
 
 // GET /logs/{id}
@@ -314,7 +328,7 @@ const getLog = async (supabase: SupabaseClient, user: User, id: string) => {
     .maybeSingle()
 
   if (result.error !== null) {
-    return jsonError('Không lấy được log', 500)
+    return jsonError('Failed to load log', 500)
   }
 
   // Không có log nào khớp id (hoặc log của người khác, hoặc đã xoá)
@@ -322,7 +336,7 @@ const getLog = async (supabase: SupabaseClient, user: User, id: string) => {
     return jsonError('Log not found', 404)
   }
 
-  return jsonResponse({ log: result.data }, 200)
+  return jsonResponse({ data: result.data }, 200)
 }
 
 // PUT /logs/{id}
@@ -332,7 +346,7 @@ const putLog = async (supabase: SupabaseClient, user: User, id: string, req: Req
   // 1. Body phải là JSON
   const body = await readJsonBody(req)
   if (body === null) {
-    return jsonError('Body phải là JSON hợp lệ', 400)
+    return jsonError('Invalid request body', 400)
   }
 
   // 2. Kiểm tra các trường bắt buộc (Log, Goal, Date & time)
@@ -346,7 +360,7 @@ const putLog = async (supabase: SupabaseClient, user: User, id: string, req: Req
   // 3. Goal phải thuộc về user
   const goalIsValid = await checkGoalBelongsToUser(supabase, user, goalId)
   if (goalIsValid === false) {
-    return jsonError('Goal không tồn tại', 400)
+    return jsonError('Goal not found', 400)
   }
 
   // 4. Skill (nếu có) phải được phép dùng
@@ -355,24 +369,28 @@ const putLog = async (supabase: SupabaseClient, user: User, id: string, req: Req
     skillId = body.skill_id
     const skillIsValid = await checkSkillCanBeUsed(supabase, user, skillId)
     if (skillIsValid === false) {
-      return jsonError('Skill không tồn tại', 400)
+      return jsonError('Skill not found', 400)
     }
   }
 
   // 5. Chuẩn bị dữ liệu để lưu
-  let description = null
-  if (typeof body.description === 'string') {
-    if (body.description.trim() !== '') {
-      description = body.description.trim()
-    }
-  }
-
   const changes: Record<string, unknown> = {
     title: String(body.title).trim(),
     goal_id: goalId,
     skill_id: skillId,
-    logged_at: String(body.logged_at),
-    description: description,
+    logged_at: new Date(String(body.logged_at)).toISOString(),
+  }
+
+  // Chỉ đổi description khi FE có gửi lên. Không gửi -> giữ nguyên giá trị cũ.
+  // Gửi null hoặc chuỗi rỗng -> xoá description.
+  if (body.description !== undefined) {
+    let description = null
+    if (typeof body.description === 'string') {
+      if (body.description.trim() !== '') {
+        description = body.description.trim()
+      }
+    }
+    changes.description = description
   }
 
   // Chỉ đổi is_achievement khi FE có gửi lên. Không gửi -> giữ nguyên giá trị cũ.
@@ -391,7 +409,7 @@ const putLog = async (supabase: SupabaseClient, user: User, id: string, req: Req
     .maybeSingle()
 
   if (result.error !== null) {
-    return jsonError('Không cập nhật được log', 500)
+    return jsonError('Failed to update log', 500)
   }
 
   // Không có dòng nào được cập nhật -> không tìm thấy log (hoặc không phải log của user)
@@ -399,9 +417,9 @@ const putLog = async (supabase: SupabaseClient, user: User, id: string, req: Req
     return jsonError('Log not found', 404)
   }
 
-  // 7. Trả log đã cập nhật + số đếm mới
-  const counts = await getCounts(supabase, user, goalId)
-  return jsonResponse({ log: result.data, counts: counts }, 200)
+  // 7. Trả log đã cập nhật
+  // const counts = await getCounts(supabase, user, goalId) //10 Oct Bỏ đi do không dùng bộ đếm ở BE
+  return jsonResponse({ data: result.data,}, 200)
 }
 
 // PATCH /logs/{id}
@@ -411,12 +429,12 @@ const patchLog = async (supabase: SupabaseClient, user: User, id: string, req: R
   // 1. Body phải là JSON
   const body = await readJsonBody(req)
   if (body === null) {
-    return jsonError('Body phải là JSON hợp lệ', 400)
+    return jsonError('Invalid request body', 400)
   }
 
   // 2. is_achievement là bắt buộc và phải là true / false
   if (typeof body.is_achievement !== 'boolean') {
-    return jsonError('is_achievement phải là true hoặc false', 400)
+    return jsonError('is_achievement must be true or false', 400)
   }
 
   // 3. Cập nhật
@@ -430,22 +448,22 @@ const patchLog = async (supabase: SupabaseClient, user: User, id: string, req: R
     .maybeSingle()
 
   if (result.error !== null) {
-    return jsonError('Không cập nhật được achievement', 500)
+    return jsonError('Failed to update achievement', 500)
   }
 
   if (result.data === null) {
     return jsonError('Log not found', 404)
   }
 
-  // 4. Trả log đã cập nhật + số đếm mới
-  const counts = await getCounts(supabase, user, result.data.goal_id)
-  return jsonResponse({ log: result.data, counts: counts }, 200)
+  // 4. Trả log đã cập nhật
+  // const counts = await getCounts(supabase, user, result.data.goal_id) //10 Oct Bỏ đi do không dùng bộ đếm ở BE
+  return jsonResponse({ data: result.data,}, 200)
 }
 
 // DELETE /logs/{id}
 // Xoá log. Bảng raw_logs có cột deleted_at, nên "xoá" ở đây là ghi thời điểm xoá
 // vào deleted_at. Mọi endpoint khác đều bỏ qua log có deleted_at, nên với người dùng
-// log đã biến mất (kể cả khỏi Achievements và các bộ đếm).
+// log đã biến mất (kể cả khỏi Achievements).
 const deleteLog = async (supabase: SupabaseClient, user: User, id: string) => {
   const result = await supabase
     .from('raw_logs')
@@ -457,7 +475,7 @@ const deleteLog = async (supabase: SupabaseClient, user: User, id: string) => {
     .maybeSingle()
 
   if (result.error !== null) {
-    return jsonError('Không xoá được log', 500)
+    return jsonError('Failed to delete log', 500)
   }
 
   // Không tìm thấy log, log của người khác, hoặc log đã xoá từ trước
@@ -465,9 +483,9 @@ const deleteLog = async (supabase: SupabaseClient, user: User, id: string) => {
     return jsonError('Log not found', 404)
   }
 
-  // Trả id của log đã xoá + số đếm mới
-  const counts = await getCounts(supabase, user, result.data.goal_id)
-  return jsonResponse({ deleted_id: id, counts: counts }, 200)
+  // Trả id của log đã xoá
+  // const counts = await getCounts(supabase, user, result.data.goal_id) //10 Oct Bỏ đi do không dùng bộ đếm ở BE
+  return jsonResponse({data: { id: id }}, 200)
 }
 
 // Mọi endpoint của Logs nằm trong function này.
@@ -487,7 +505,7 @@ Deno.serve(async (req) => {
   // 1. Kiểm tra đăng nhập (function để verify_jwt = false nên phải tự kiểm tra)
   const userResult = await supabase.auth.getUser()
   if (userResult.error !== null || userResult.data.user === null) {
-    return jsonError('Bạn chưa đăng nhập', 401)
+    return jsonError('Please sign in to continue', 401)
   }
   const user = userResult.data.user
 
@@ -505,7 +523,9 @@ Deno.serve(async (req) => {
   // GET /logs/{id} -> lấy 1 log
   if (req.method === 'GET') {
     if (id === null) {
-      return await getLogs(supabase, user)
+  // 10 Oct - Thêm logic đọc goal_id trên url, nếu không có thì trả về null
+      const goalId = new URL (req.url).searchParams.get('goal_id')
+      return await getLogs(supabase, user, goalId)
     }
     return await getLog(supabase, user, id)
   }
@@ -513,7 +533,7 @@ Deno.serve(async (req) => {
   // PUT /logs/{id}
   if (req.method === 'PUT') {
     if (id === null) {
-      return jsonError('Thiếu id của log', 400)
+      return jsonError('Log ID is required', 400)
     }
     return await putLog(supabase, user, id, req)
   }
@@ -521,7 +541,7 @@ Deno.serve(async (req) => {
   // PATCH /logs/{id}
   if (req.method === 'PATCH') {
     if (id === null) {
-      return jsonError('Thiếu id của log', 400)
+      return jsonError('Log ID is required', 400)
     }
     return await patchLog(supabase, user, id, req)
   }
@@ -529,7 +549,7 @@ Deno.serve(async (req) => {
   // DELETE /logs/{id}
   if (req.method === 'DELETE') {
     if (id === null) {
-      return jsonError('Thiếu id của log', 400)
+      return jsonError('Log ID is required', 400)
     }
     return await deleteLog(supabase, user, id)
   }

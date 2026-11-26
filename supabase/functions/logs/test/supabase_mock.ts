@@ -8,6 +8,7 @@ export type QueryCall = {
   options?: Record<string, unknown>
   payload?: unknown
   filters: Array<[string, string, unknown]>
+  order?: [string, Record<string, unknown> | undefined]
   terminal: 'single' | 'maybeSingle' | 'await'
 }
 
@@ -58,6 +59,10 @@ const builder = (table: string) => {
     },
     is(col: string, val: unknown) {
       call.filters.push(['is', col, val])
+      return b
+    },
+    order(col: string, options?: Record<string, unknown>) {
+      call.order = [col, options]
       return b
     },
     single() {

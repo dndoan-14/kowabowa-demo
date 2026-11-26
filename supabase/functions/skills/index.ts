@@ -17,7 +17,7 @@ function validateSkill(title: unknown, description: unknown) {
     return "Title is required";
   }
   if (description != null && typeof description !== "string") {
-    return "Description must be text";
+    return "Description must be text";   // trả về dạng lỗi thay vì cụ thể message
   }
   return null;
 }
@@ -86,7 +86,7 @@ Deno.serve(async (req) => {
         title: cleanTitle,
         description,
         user_id: user.id,
-        is_system: false,
+        is_system: false,    // user_id = null vs. is_system -> null thì tiết kiệm được 1 cột, nhưng is_system thì tường minh hơn 
       })
       .select()
       .single();
